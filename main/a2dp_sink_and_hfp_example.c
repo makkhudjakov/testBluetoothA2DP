@@ -41,17 +41,10 @@
 #define ESP_IDF_VERSION_VAL(major, minor, patch) 1
 #endif
 
-#if (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 0, 0))
-#define HFP_RESAMPLE_RATE 16000
-#else
-#define HFP_RESAMPLE_RATE 8000
-#endif
-
 static const char *TAG = "BLUETOOTH_EXAMPLE";
-// static const char *BT_HF_TAG = "BT_HF";
 
-static audio_element_handle_t  raw_read, bt_stream_reader, i2s_stream_writer, i2s_stream_reader;
-static audio_pipeline_handle_t pipeline_d, pipeline_e;
+static audio_element_handle_t  bt_stream_reader, i2s_stream_writer;
+static audio_pipeline_handle_t pipeline_d;
 
 void app_main(void)
 {
@@ -72,8 +65,6 @@ void app_main(void)
         .mode = BLUETOOTH_A2DP_SINK,
     };
     bluetooth_service_start(&bt_cfg);
-    // esp_hf_client_register_callback(bt_hf_client_cb);
-    // esp_hf_client_init();
 
     ESP_LOGI(TAG, "[ 2 ] Start codec chip");
     audio_board_handle_t board_handle = audio_board_init();
@@ -82,63 +73,23 @@ void app_main(void)
     ESP_LOGI(TAG, "[ 3 ] Create audio pipeline for playback");
     audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
     pipeline_d = audio_pipeline_init(&pipeline_cfg);
-    pipeline_e = audio_pipeline_init(&pipeline_cfg);
 
     ESP_LOGI(TAG, "[3.1] Create i2s stream to write data to codec chip and read data from codec chip");
     i2s_stream_cfg_t i2s_cfg1 = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg1.type = AUDIO_STREAM_WRITER;
     i2s_stream_writer = i2s_stream_init(&i2s_cfg1);
 
-//     i2s_stream_cfg_t i2s_cfg2 = I2S_STREAM_CFG_DEFAULT();
-//     i2s_cfg2.type = AUDIO_STREAM_READER;
-// #if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
-//     i2s_cfg2.i2s_port = 1;
-//     i2s_cfg2.i2s_config.use_apll = false;
-// #endif
-//     i2s_stream_reader = i2s_stream_init(&i2s_cfg2);
-
-    // raw_stream_cfg_t raw_cfg = RAW_STREAM_CFG_DEFAULT();
-    // raw_cfg.type = AUDIO_STREAM_READER;
-    // raw_read = raw_stream_init(&raw_cfg);
-
     ESP_LOGI(TAG, "[3.2] Create Bluetooth stream");
     bt_stream_reader = bluetooth_service_create_stream();
-
-// #if (CONFIG_ESP_LYRATD_MSC_V2_1_BOARD || CONFIG_ESP_LYRATD_MSC_V2_2_BOARD)
-//     rsp_filter_cfg_t rsp_d_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
-//     audio_element_handle_t filter_d = rsp_filter_init(&rsp_d_cfg);
-//     audio_pipeline_register(pipeline_d, filter_d, "filter_d");
-
-//     rsp_filter_cfg_t rsp_e_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
-//     rsp_e_cfg.src_rate = 48000;
-//     rsp_e_cfg.src_ch = 2;
-//     rsp_e_cfg.dest_rate = HFP_RESAMPLE_RATE;
-//     rsp_e_cfg.dest_ch = 1;
-//     audio_element_handle_t filter_e = rsp_filter_init(&rsp_e_cfg);
-//     audio_pipeline_register(pipeline_e, filter_e, "filter_e");
-// #endif
 
     ESP_LOGI(TAG, "[3.3] Register all elements to audio pipeline");
     audio_pipeline_register(pipeline_d, bt_stream_reader, "bt");
     audio_pipeline_register(pipeline_d, i2s_stream_writer, "i2s_w");
 
-    // audio_pipeline_register(pipeline_e, i2s_stream_reader, "i2s_r");
-    // audio_pipeline_register(pipeline_e, raw_read, "raw");
-
     ESP_LOGI(TAG, "[3.4] Link it together [Bluetooth]-->bt_stream_reader-->i2s_stream_writer-->[codec_chip]");
-// #if (CONFIG_ESP_LYRATD_MSC_V2_1_BOARD || CONFIG_ESP_LYRATD_MSC_V2_2_BOARD)
-//     const char *link_d[3] = {"bt", "filter_d", "i2s_w"};
-//     audio_pipeline_link(pipeline_d, &link_d[0], 3);
-
-//     const char *link_e[3] = {"i2s_r", "filter_e", "raw"};
-//     audio_pipeline_link(pipeline_e, &link_e[0], 3);
-// #else
     const char *link_d[2] = {"bt", "i2s_w"};
     audio_pipeline_link(pipeline_d, &link_d[0], 2);
 
-    const char *link_e[2] = {"i2s_r", "raw"};
-    audio_pipeline_link(pipeline_e, &link_e[0], 2);
-// #endif
 
     ESP_LOGI(TAG, "[ 4 ] Initialize peripherals");
     esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
@@ -165,7 +116,6 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[ 6 ] Start audio_pipeline");
     audio_pipeline_run(pipeline_d);
-    audio_pipeline_run(pipeline_e);
 
     ESP_LOGI(TAG, "[ 7 ] Listen for all pipeline events");
     while (1) {
@@ -183,18 +133,8 @@ void app_main(void)
 
             ESP_LOGI(TAG, "[ * ] Receive music info from Bluetooth, sample_rates=%d, bits=%d, ch=%d",
                      music_info.sample_rates, music_info.bits, music_info.channels);
-#if (CONFIG_ESP_LYRATD_MSC_V2_1_BOARD || CONFIG_ESP_LYRATD_MSC_V2_2_BOARD)
-            rsp_filter_set_src_info(filter_d, music_info.sample_rates, music_info.channels);
-            i2s_stream_set_clk(i2s_stream_writer, 48000, 16, 2);
-#else
             audio_element_setinfo(i2s_stream_writer, &music_info);
             i2s_stream_set_clk(i2s_stream_writer, music_info.sample_rates, music_info.bits, music_info.channels);
-#endif
-
-#if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
-            i2s_stream_set_clk(i2s_stream_reader, music_info.sample_rates, music_info.bits, music_info.channels);
-#endif
-
             continue;
         }
         if ((msg.source_type == PERIPH_ID_TOUCH || msg.source_type == PERIPH_ID_BUTTON || msg.source_type == PERIPH_ID_ADC_BTN)
